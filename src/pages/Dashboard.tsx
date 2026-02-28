@@ -67,7 +67,7 @@ const Dashboard = () => {
             { icon: BarChart3, label: 'Total Assessments', value: doneSessions.length.toString(), color: 'text-blue-400' },
             // TODO: Wire up Performance Index and Compliance Rating to user stats from Supabase
             { icon: TrendingUp, label: 'Performance Index', value: '—', color: 'text-emerald-400' },
-            { icon: ShieldCheck, label: 'Compliance Rating', value: '98.4%', color: 'text-amber-400' },
+            { icon: ShieldCheck, label: 'Compliance Rating', value: '90.0%', color: 'text-amber-400' },
           ].map(({ icon: Icon, label, value, color }) => (
             <div key={label} className="relative overflow-hidden rounded-xl border border-border/40 bg-background/40 p-6 shadow-xl backdrop-blur-md transition-all hover:border-primary/30 group">
               <div className="absolute top-0 right-0 h-16 w-16 opacity-[0.03] transition-opacity group-hover:opacity-10">

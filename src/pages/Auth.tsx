@@ -65,7 +65,7 @@ const Auth = () => {
           <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary shadow-[0_0_40px_-10px_rgba(37,99,235,0.6)]">
             <ShieldCheck className="h-8 w-8 text-white" />
           </div>
-          <h1 className="font-display text-4xl font-bold tracking-tight text-foreground">AiInterviewer</h1>
+          <h1 className="font-display text-4xl font-bold tracking-tight text-foreground">AI Interviewer</h1>
           <p className="mt-2 text-xs font-bold uppercase tracking-[0.3em] text-blue-500">for valtrix</p>
         </div>
 
@@ -90,7 +90,7 @@ const Auth = () => {
             {mode === 'signin' ? 'Portal Access' : mode === 'signup' ? 'Identity Request' : 'Secure Recovery'}
           </h2>
           <p className="mb-8 text-sm text-muted-foreground/90 font-medium">
-            Authorized personnel only. Please provide your credentials.
+            Authorized personel only. Please provide your credentials.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-5">

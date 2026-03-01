@@ -42,8 +42,8 @@ const Dashboard = () => {
         <header className="mb-12 flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h1 className="font-display text-2xl font-bold tracking-tight">AiInterviewer</h1>
-              <span className="text-[10px] uppercase tracking-widest text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border/50">for valtrix</span>
+              <h1 className="font-display text-2xl font-bold tracking-tight">AI Interviewer</h1>
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border/50">for Valtrix</span>
             </div>
             <p className="text-sm text-muted-foreground/80 font-medium italic">Authorized Access: {user?.user_metadata?.display_name || user?.email?.split('@')[0]}</p>
           </div>
@@ -86,9 +86,8 @@ const Dashboard = () => {
           ))}
         </div>
 
-        {/* Primary Action Zone */}
         <div className="mb-12">
-          <Button size="lg" className="h-14 gap-3 rounded-xl px-10 text-sm font-bold uppercase tracking-widest shadow-[0_0_25px_-5px_rgba(var(--primary),0.4)] transition-all hover:scale-[1.01] active:scale-[0.98]" onClick={() => navigate('/setup')}>
+          <Button size="lg" className="h-14 gap-3 bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-500 rounded-xl px-10 text-sm font-bold uppercase tracking-widest shadow-[0_0_25px_-5px_rgba(var(--primary),0.5)] transition-all hover:scale-[1.01] active:scale-[0.98]" onClick={() => navigate('/setup')}>
             <Plus className="h-5 w-5" />
             Initiate Assessment
           </Button>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -11,7 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import type { SessionConfig, InterviewType, Difficulty } from '@/types/interview';
 import { ArrowLeft, ArrowRight, Briefcase, GraduationCap, Code, Users, Wrench, Mic, Check } from 'lucide-react';
 
-const STEPS = ['Type', 'Difficulty', 'Duration', 'Details', 'Sound Check'];
+const STEPS = ['Type', 'Difficulty', 'Duration', 'Details', 'A/V Check'];
 
 const TYPES: { value: InterviewType; label: string; icon: React.ElementType; desc: string }[] = [
   { value: 'hr', label: 'HR', icon: Users, desc: 'Culture fit, motivation, soft skills' },
@@ -35,7 +35,10 @@ const SetupWizard = () => {
   const { toast } = useToast();
   const [step, setStep] = useState(0);
   const [micOk, setMicOk] = useState<boolean | null>(null);
+  const [cameraOk, setCameraOk] = useState<boolean | null>(null);
   const [creating, setCreating] = useState(false);
+  const [avStream, setAvStream] = useState<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const [config, setConfig] = useState<SessionConfig>({
     interview_type: 'behavioral',
@@ -52,42 +55,77 @@ const SetupWizard = () => {
   const update = <K extends keyof SessionConfig>(key: K, value: SessionConfig[K]) =>
     setConfig(c => ({ ...c, [key]: value }));
 
-  const testMic = async () => {
+  useEffect(() => {
+    if (step === 4) {
+      testAV();
+    } else {
+      stopAV();
+    }
+    return () => {
+      stopAV();
+    };
+  }, [step]);
+
+  useEffect(() => {
+    if (step === 4 && avStream && videoRef.current) {
+      videoRef.current.srcObject = avStream;
+    }
+  }, [avStream, step]);
+
+  const testAV = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(t => t.stop());
+      if (avStream) {
+        avStream.getTracks().forEach(t => t.stop());
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      setAvStream(stream);
       setMicOk(true);
-    } catch {
+      setCameraOk(true);
+    } catch (err) {
+      console.error(err);
       setMicOk(false);
+      setCameraOk(false);
+    }
+  };
+
+  const stopAV = () => {
+    if (avStream) {
+      avStream.getTracks().forEach(t => t.stop());
+      setAvStream(null);
     }
   };
 
   const startInterview = async () => {
     setCreating(true);
-    const { data, error } = await supabase
-      .from('interview_sessions')
-      .insert({
-        user_id: user!.id,
-        status: 'in_progress',
-        interview_type: config.interview_type,
-        difficulty: config.difficulty,
-        duration_planned: config.duration_planned,
-        panel_size: config.panel_size,
-        company: config.company || null,
-        role_title: config.role_title || null,
-        job_description: config.job_description || null,
-        company_url: config.company_url || null,
-        goals: config.goals || null,
-      })
-      .select('id')
-      .single();
+    try {
+      if (!user) throw new Error("Not logged in");
 
-    if (error || !data) {
-      toast({ title: 'Error', description: 'Could not create session', variant: 'destructive' });
+      // Insert directly into interview_sessions using auth user id
+      const { data, error } = await supabase
+        .from('interview_sessions')
+        .insert({
+          user_id: user.id,
+          status: 'in_progress',
+          interview_type: config.interview_type,
+          difficulty: config.difficulty,
+          duration_planned: config.duration_planned,
+          panel_size: config.panel_size,
+          company: config.company || null,
+          role_title: config.role_title || null,
+          job_description: config.job_description || null,
+          company_url: config.company_url || null,
+          goals: config.goals || null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      navigate(`/interview/${data.id}`);
+    } catch (error: any) {
+      console.error(error);
+      toast({ title: 'Error', description: error.message || 'Could not create session', variant: 'destructive' });
       setCreating(false);
-      return;
     }
-    navigate(`/interview/${data.id}`);
   };
 
   return (
@@ -216,26 +254,74 @@ const SetupWizard = () => {
             </>
           )}
 
-          {/* Step 4: Sound Check */}
+          {/* Step 4: A/V Check */}
           {step === 4 && (
             <>
-              <h2 className="mb-1 font-display text-heading">Sound Check</h2>
-              <p className="mb-6 text-sm text-muted-foreground">Test your microphone before we begin.</p>
-              <div className="flex flex-col items-center gap-4 py-4">
-                <div className={`flex h-20 w-20 items-center justify-center rounded-full transition-all ${
-                  micOk === true ? 'bg-accent/10' : micOk === false ? 'bg-destructive/10' : 'bg-muted'
-                }`}>
-                  <Mic className={`h-8 w-8 ${micOk === true ? 'text-accent' : micOk === false ? 'text-destructive' : 'text-muted-foreground'}`} />
-                </div>
-                {micOk === null && <Button variant="outline" onClick={testMic}>Test Microphone</Button>}
-                {micOk === true && <p className="text-sm font-medium text-accent">Microphone working!</p>}
-                {micOk === false && (
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-destructive">Microphone not detected</p>
-                    <p className="mt-1 text-xs text-muted-foreground">You can still use text input mode.</p>
-                    <Button variant="outline" size="sm" className="mt-2" onClick={testMic}>Retry</Button>
+              <h2 className="mb-1 font-display text-heading">A/V Check</h2>
+              <p className="mb-6 text-sm text-muted-foreground">Enable camera and microphone access before starting the interview.</p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+                {/* Camera Preview */}
+                <div className="flex flex-col items-center justify-center border border-border/40 rounded-xl overflow-hidden bg-black/40 relative aspect-video shadow-inner">
+                  {cameraOk === true && avStream ? (
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover scale-x-[-1]"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-4 text-center text-muted-foreground">
+                      <div className="h-10 w-10 mb-2 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">📷</div>
+                      <p className="text-xs font-semibold">Camera Access Required</p>
+                    </div>
+                  )}
+                  
+                  {/* Status Overlay */}
+                  <div className="absolute bottom-2 left-2 z-20 flex items-center gap-1.5 rounded-full bg-background/80 backdrop-blur-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">
+                    <span className={`h-1.5 w-1.5 rounded-full ${cameraOk === true ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+                    <span>Camera: {cameraOk === true ? 'Active' : cameraOk === false ? 'Blocked' : 'Testing...'}</span>
                   </div>
-                )}
+                </div>
+
+                {/* Microphone Level */}
+                <div className="flex flex-col justify-between p-6 border border-border/40 rounded-xl bg-background/25">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Microphone Status</span>
+                      <span className={`inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider ${micOk === true ? 'text-emerald-500' : 'text-red-500'}`}>
+                        {micOk === true ? 'Active' : micOk === false ? 'Blocked' : 'Testing...'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                        <div className={`h-full transition-all duration-300 ${micOk === true ? 'w-full bg-emerald-500 animate-pulse' : 'w-0'}`} />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {micOk === true 
+                          ? 'Speak normally to test audio capture levels.' 
+                          : 'Microphone permission is required to analyze your voice answers.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {(micOk === false || cameraOk === false) && (
+                    <div className="mt-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-center">
+                      <p className="text-xs font-medium text-destructive text-destructive-foreground">Permissions blocked. Please check your browser site settings and retry.</p>
+                      <Button variant="outline" size="sm" className="mt-2 text-xs" onClick={testAV}>Retry Authorization</Button>
+                    </div>
+                  )}
+                  {micOk === null && cameraOk === null && (
+                    <Button variant="outline" className="w-full" onClick={testAV}>Authorize A/V Devices</Button>
+                  )}
+                  {micOk === true && cameraOk === true && (
+                    <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-center">
+                      <p className="text-xs font-medium text-emerald-400">All systems operational. Ready to start interview.</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </>
           )}
@@ -251,7 +337,7 @@ const SetupWizard = () => {
               Next <ArrowRight className="ml-1 h-4 w-4" />
             </Button>
           ) : (
-            <Button onClick={startInterview} disabled={creating} className="shadow-glow">
+            <Button onClick={startInterview} disabled={creating || micOk !== true || cameraOk !== true} className="shadow-glow">
               {creating ? 'Starting…' : 'Start Interview'}
             </Button>
           )}

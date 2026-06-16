@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePreferences } from '@/contexts/PreferencesContext';
 import { supabase } from '@/integrations/supabase/client';
+import { DeepgramClient } from "@deepgram/sdk";
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
@@ -11,6 +13,7 @@ import { Mic, MicOff, Square, MessageSquare, Clock, Send, BookmarkPlus, ChevronR
 const InterviewRoom = () => {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const { captionsEnabled } = usePreferences();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -24,6 +27,9 @@ const InterviewRoom = () => {
   const [elapsed, setElapsed] = useState(0);
   const [ending, setEnding] = useState(false);
   const [waitingForAI, setWaitingForAI] = useState(false);
+
+  const [candidateStream, setCandidateStream] = useState<MediaStream | null>(null);
+  const candidateVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef(window.speechSynthesis);
@@ -40,9 +46,33 @@ const InterviewRoom = () => {
   // Fetch session
   useEffect(() => {
     if (!id) return;
-    supabase.from('interview_sessions').select('*').eq('id', id).single()
-      .then(({ data }) => {
-        if (data) setSession(data as InterviewSession);
+    supabase
+      .from('interview_sessions')
+      .select('*')
+      .eq('id', id)
+      .single()
+      .then(({ data, error }) => {
+        if (data && !error) {
+          const mapped: InterviewSession = {
+            id: data.id,
+            user_id: data.user_id,
+            status: data.status === 'done' || data.status === 'completed' ? 'done' : data.status === 'ended_early' || data.status === 'failed' ? 'failed' : data.status,
+            interview_type: data.interview_type || 'behavioral',
+            difficulty: data.difficulty || 'medium',
+            duration_planned: data.duration_planned || 30,
+            duration_actual: data.duration_actual || undefined,
+            company: data.company || '',
+            role_title: data.role_title || '',
+            job_description: data.job_description || '',
+            company_url: data.company_url || '',
+            goals: data.goals || '',
+            panel_size: data.panel_size || 1,
+            audio_url: data.audio_url || undefined,
+            created_at: data.created_at,
+            updated_at: data.updated_at || data.created_at,
+          };
+          setSession(mapped);
+        }
       });
   }, [id]);
 
@@ -55,9 +85,37 @@ const InterviewRoom = () => {
     return () => clearInterval(timerRef.current);
   }, []);
 
-  // Start audio recording
+  // Start candidate camera/mic stream
   useEffect(() => {
+    navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+      .then(stream => {
+        setCandidateStream(stream);
+      })
+      .catch(err => {
+        console.error('Failed to get candidate video stream', err);
+      });
+
+    return () => {
+      setCandidateStream(prev => {
+        if (prev) {
+          prev.getTracks().forEach(t => t.stop());
+        }
+        return null;
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (candidateStream && candidateVideoRef.current) {
+      candidateVideoRef.current.srcObject = candidateStream;
+    }
+  }, [candidateStream]);
+
+  // Start audio recording for archival chunks
+  useEffect(() => {
+    let activeStream: MediaStream | null = null;
     navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      activeStream = stream;
       const mr = new MediaRecorder(stream);
       mediaRecorderRef.current = mr;
       mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
@@ -65,7 +123,12 @@ const InterviewRoom = () => {
     }).catch(() => {
       // Can't record - that's ok, text mode still works
     });
-    return () => { mediaRecorderRef.current?.stop(); };
+    return () => {
+      mediaRecorderRef.current?.stop();
+      if (activeStream) {
+        activeStream.getTracks().forEach(t => t.stop());
+      }
+    };
   }, []);
 
   // Start with interviewer greeting
@@ -95,18 +158,6 @@ const InterviewRoom = () => {
     setCurrentSpeaker('InterviewerA');
     setInterviewerSpeaking(true);
 
-    // Save to DB
-    if (id) {
-      supabase.from('transcript_turns').insert({
-        session_id: id,
-        speaker: turn.speaker,
-        text: turn.text,
-        timestamp_start: turn.timestamp_start,
-        timestamp_end: (Date.now() - startTimeRef.current) / 1000,
-        turn_index: turn.turn_index,
-      }).then(() => {});
-    }
-
     // Speak
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 0.95;
@@ -121,50 +172,6 @@ const InterviewRoom = () => {
     synthRef.current.speak(utter);
   }, [id]);
 
-  // Speech recognition setup
-  const startListening = useCallback(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setTextMode(true);
-      toast({ title: 'Speech not supported', description: 'Using text mode instead.' });
-      return;
-    }
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-    let finalTranscript = '';
-
-    recognition.onresult = (event: any) => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript + ' ';
-        else interim += event.results[i][0].transcript;
-      }
-    };
-
-    recognition.onend = () => {
-      if (finalTranscript.trim()) {
-        submitCandidateAnswer(finalTranscript.trim());
-      }
-      setIsListening(false);
-    };
-
-    recognition.onerror = () => {
-      setIsListening(false);
-      setTextMode(true);
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
-  }, []);
-
-  const stopListening = () => {
-    recognitionRef.current?.stop();
-    setIsListening(false);
-  };
-
   const submitCandidateAnswer = async (text: string) => {
     const turn: TranscriptTurn = {
       speaker: 'Candidate',
@@ -174,18 +181,6 @@ const InterviewRoom = () => {
     };
     setTranscript(prev => [...prev, turn]);
 
-    // Save to DB
-    if (id) {
-      await supabase.from('transcript_turns').insert({
-        session_id: id,
-        speaker: 'Candidate',
-        text,
-        timestamp_start: turn.timestamp_start,
-        timestamp_end: (Date.now() - startTimeRef.current) / 1000,
-        turn_index: turn.turn_index,
-      });
-    }
-
     // Get AI follow-up
     setWaitingForAI(true);
     try {
@@ -193,16 +188,82 @@ const InterviewRoom = () => {
         body: {
           session_config: session,
           transcript: [...transcriptRef.current, turn],
-        },
+        }
       });
       if (error) throw error;
       const nextQ = data?.question || "Can you elaborate on that?";
       addInterviewerTurn(nextQ);
-    } catch {
+    } catch (error) {
+      console.error(error);
       addInterviewerTurn("Interesting. Can you tell me more about that?");
     }
     setWaitingForAI(false);
   };
+
+  // Speech recognition setup using Deepgram
+  const startListening = useCallback(async () => {
+    setIsListening(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const client = new DeepgramClient({ apiKey: import.meta.env.VITE_DEEPGRAM_API_KEY || "proxy" });
+      const connection = await client.listen.v1.connect({
+        model: "nova-3",
+        language: "en-US",
+        smart_format: "true"
+      });
+
+      connection.on("open", () => {
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0 && connection.socket?.readyState === 1) {
+            connection.socket.send(event.data);
+          }
+        };
+        mediaRecorder.start(250);
+        
+        recognitionRef.current = { 
+          stop: () => { 
+            mediaRecorder.stop(); 
+            connection.socket?.close(); 
+            stream.getTracks().forEach(t => t.stop()); 
+          } 
+        };
+      });
+
+      connection.on("message", (data: any) => {
+        if (data.type === "Results" && data.channel?.alternatives?.[0]) {
+          const transcriptText = data.channel.alternatives[0].transcript;
+          if (transcriptText.trim() && data.is_final) {
+            submitCandidateAnswer(transcriptText.trim());
+          }
+        }
+      });
+
+      connection.on("close", () => {
+        setIsListening(false);
+      });
+
+      connection.on("error", (err: any) => {
+        console.error(err);
+        setIsListening(false);
+        setTextMode(true);
+      });
+
+      connection.connect();
+
+    } catch (err) {
+      console.error(err);
+      toast({ title: 'Speech not supported', description: 'Using text mode instead.' });
+      setTextMode(true);
+      setIsListening(false);
+    }
+  }, [toast, submitCandidateAnswer]);
+
+  const stopListening = () => {
+    recognitionRef.current?.stop();
+    setIsListening(false);
+  };
+
 
   const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -230,15 +291,26 @@ const InterviewRoom = () => {
       if (!uploadErr) audioUrl = path;
     }
 
-    // Update session
-    await supabase.from('interview_sessions').update({
-      status: 'debrief_generating',
-      duration_actual: durationActual,
-      audio_url: audioUrl || null,
-    }).eq('id', id!);
+    // Update session status and audio
+    await supabase
+      .from('interview_sessions')
+      .update({
+        status: 'done',
+        duration_actual: durationActual,
+        audio_url: audioUrl || null,
+      })
+      .eq('id', id!);
+
+    // Insert/upsert session_debriefs with transcript
+    await supabase
+      .from('session_debriefs')
+      .upsert({
+        session_id: id!,
+        debrief_json: { transcript_turns: transcriptRef.current }
+      }, { onConflict: 'session_id' });
 
     // Navigate to debrief (which will trigger generation)
-    navigate(`/debrief/${id}`);
+    navigate(`/debrief/${id}`, { replace: true });
   };
 
   const formatTime = (s: number) => {
@@ -273,40 +345,82 @@ const InterviewRoom = () => {
 
       {/* Interview area */}
       <div className="flex flex-1 flex-col">
-        {/* Interviewer avatar */}
-        <div className="flex flex-col items-center gap-4 py-8">
-          <div className={`flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 text-2xl transition-all ${
-            interviewerSpeaking ? 'speaking-ring' : ''
-          }`}>
-            👤
-          </div>
-          <div className="text-center">
-            <p className="font-display font-semibold">Interviewer</p>
-            <p className="text-sm text-muted-foreground">
-              {interviewerSpeaking ? 'Speaking…' : waitingForAI ? 'Thinking…' : currentSpeaker === 'Candidate' ? 'Your turn' : ''}
-            </p>
+        {/* Interview area split-screen */}
+        <div className="flex flex-col md:flex-row gap-6 max-w-[850px] mx-auto w-full px-4 py-6">
+          {/* Left Pane: Interviewer */}
+          <div className="flex-1 glass border border-border/40 rounded-2xl p-6 flex flex-col items-center justify-center min-h-[220px] md:h-[240px] shadow-card relative">
+            <div className={`flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-2xl transition-all ${
+              interviewerSpeaking ? 'speaking-ring' : ''
+            }`}>
+              👤
+            </div>
+            <div className="text-center mt-3">
+              <p className="font-display font-semibold text-foreground">Interviewer</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {interviewerSpeaking ? 'Speaking…' : waitingForAI ? 'Thinking…' : currentSpeaker === 'Candidate' ? 'Listening to you' : 'Standby'}
+               </p>
+            </div>
+            
+            {/* Waveform */}
+            {interviewerSpeaking ? (
+              <div className="flex items-center gap-1 mt-4 h-6">
+                {[...Array(5)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="w-1 rounded-full bg-primary"
+                    style={{
+                      height: '4px',
+                      animation: `waveform-bar 0.6s ease-in-out ${i * 0.1}s infinite`,
+                    }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="h-6 mt-4 flex items-center justify-center">
+                <span className="text-[10px] text-muted-foreground/45 tracking-widest font-mono">STANDBY</span>
+              </div>
+            )}
           </div>
 
-          {/* Waveform */}
-          {interviewerSpeaking && (
-            <div className="flex items-center gap-1">
-              {[...Array(5)].map((_, i) => (
-                <div
-                  key={i}
-                  className="w-1 rounded-full bg-primary"
-                  style={{
-                    height: '4px',
-                    animation: `waveform-bar 0.6s ease-in-out ${i * 0.1}s infinite`,
-                  }}
-                />
-              ))}
+          {/* Right Pane: Candidate Video Feed */}
+          <div className="flex-1 glass border border-border/40 rounded-2xl p-6 flex flex-col items-center justify-center min-h-[220px] md:h-[240px] shadow-card relative overflow-hidden bg-black/30">
+            {candidateStream ? (
+              <video
+                ref={candidateVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 w-full h-full object-cover scale-x-[-1] opacity-90 transition-opacity duration-300"
+              />
+            ) : (
+              <div className="flex flex-col items-center text-center text-muted-foreground p-4">
+                <div className="h-10 w-10 rounded-full bg-destructive/15 flex items-center justify-center text-destructive mb-2">📷</div>
+                <p className="font-medium text-xs text-foreground">Camera Offline</p>
+                <p className="text-[10px] text-muted-foreground max-w-[150px] mt-0.5">Check browser camera permissions.</p>
+              </div>
+            )}
+            
+            {/* Candidate Status Overlay */}
+            <div className="absolute bottom-3 left-3 right-3 z-20 flex justify-between items-center bg-background/80 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-border/40 text-[10px] shadow-sm">
+              <span className="font-bold text-foreground">You</span>
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-0.5 text-muted-foreground font-semibold">
+                  <span className={`h-1.5 w-1.5 rounded-full ${candidateStream ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+                  Cam
+                </span>
+                <span className="flex items-center gap-0.5 text-muted-foreground font-semibold">
+                  <span className={`h-1.5 w-1.5 rounded-full ${isListening ? 'bg-emerald-500 animate-pulse' : 'bg-muted'}`} />
+                  Mic
+                </span>
+              </div>
             </div>
-          )}
+          </div>
         </div>
 
         {/* Transcript / Captions */}
         <div className="mx-auto max-w-[700px] flex-1 overflow-auto px-4">
-          <div className="space-y-3 pb-4">
+          {captionsEnabled ? (
+            <div className="space-y-3 pb-4">
             {transcript.map((t, i) => (
               <div key={i} className={`flex gap-3 animate-fade-slide-up ${t.speaker === 'Candidate' ? 'flex-row-reverse' : ''}`}>
                 <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
@@ -331,6 +445,15 @@ const InterviewRoom = () => {
               </div>
             )}
           </div>
+          ) : (
+            <div className="flex h-full items-center justify-center opacity-50">
+              <div className="flex flex-col items-center gap-2">
+                <MicOff className="h-8 w-8 text-muted-foreground" />
+                <p className="text-sm font-medium text-muted-foreground">Captions Disabled</p>
+                <p className="text-xs text-muted-foreground">You can enable them in Settings</p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Input area */}

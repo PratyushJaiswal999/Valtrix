@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Plus, TrendingUp, ShieldCheck, LogOut, Settings, Clock, BarChart3, Moon, Sun } from 'lucide-react';
+import { Plus, TrendingUp, ShieldCheck, Settings, Clock, BarChart3, Moon, Sun, LogOut } from 'lucide-react';
 import type { InterviewSession } from '@/types/interview';
 import AuroraBackground from '@/components/AuroraBackground';
 
@@ -14,18 +14,75 @@ const Dashboard = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<InterviewSession[]>([]);
+  const [performanceIndex, setPerformanceIndex] = useState('—');
+  const [complianceRating, setComplianceRating] = useState('—');
   const [loading, setLoading] = useState(true);
   const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     const fetchSessions = async () => {
-      const { data } = await supabase
+      if (!user) return;
+
+      // Fetch interview sessions directly by user_id
+      const { data: sessionData, error: sessionError } = await supabase
         .from('interview_sessions')
         .select('*')
-        .eq('user_id', user!.id)
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(10);
-      setSessions((data as InterviewSession[]) || []);
+
+      if (sessionData && !sessionError) {
+        const mapped = sessionData.map((s: any) => ({
+          id: s.id,
+          user_id: s.user_id,
+          status: s.status,
+          interview_type: s.interview_type || 'behavioral',
+          difficulty: s.difficulty || 'medium',
+          duration_planned: s.duration_planned || 30,
+          duration_actual: s.duration_actual || undefined,
+          company: s.company || '',
+          role_title: s.role_title || '',
+          job_description: s.job_description || '',
+          company_url: s.company_url || '',
+          goals: s.goals || '',
+          panel_size: s.panel_size || 1,
+          audio_url: s.audio_url || undefined,
+          created_at: s.created_at,
+          updated_at: s.updated_at || s.created_at,
+        }));
+        setSessions(mapped as InterviewSession[]);
+      }
+
+      // Fetch debriefs to calculate score stats
+      const { data: allSessions } = await supabase
+        .from('interview_sessions')
+        .select('id')
+        .eq('user_id', user.id);
+
+      if (allSessions && allSessions.length > 0) {
+        const ids = allSessions.map(s => s.id);
+        const { data: debriefData } = await supabase
+          .from('session_debriefs')
+          .select('debrief_json')
+          .in('session_id', ids);
+
+        if (debriefData && debriefData.length > 0) {
+          let totalPerf = 0, count = 0;
+          debriefData.forEach((d: any) => {
+            const debrief = d.debrief_json?.debrief;
+            const overall = debrief?.scores?.overall;
+            if (overall !== undefined) {
+              totalPerf += Number(overall);
+              count++;
+            }
+          });
+          if (count > 0) {
+            setPerformanceIndex((totalPerf / count).toFixed(1));
+            setComplianceRating((totalPerf / count).toFixed(1) + '%');
+          }
+        }
+      }
+
       setLoading(false);
     };
     fetchSessions();
@@ -45,7 +102,7 @@ const Dashboard = () => {
               <h1 className="font-display text-2xl font-bold tracking-tight">AI Interviewer</h1>
               <span className="text-[10px] uppercase tracking-widest text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border/50">for Valtrix</span>
             </div>
-            <p className="text-sm text-muted-foreground/80 font-medium italic">Authorized Access: {user?.user_metadata?.display_name || user?.email?.split('@')[0]}</p>
+            <p className="text-sm text-muted-foreground/80 font-medium italic">Authorized Access: {user?.email?.split('@')[0]}</p>
           </div>
           
           <div className="flex items-center gap-3">
@@ -65,9 +122,8 @@ const Dashboard = () => {
         <div className="mb-10 grid grid-cols-1 gap-5 sm:grid-cols-3">
           {[
             { icon: BarChart3, label: 'Total Assessments', value: doneSessions.length.toString(), color: 'text-blue-400' },
-            // TODO: Wire up Performance Index and Compliance Rating to user stats from Supabase
-            { icon: TrendingUp, label: 'Performance Index', value: '—', color: 'text-emerald-400' },
-            { icon: ShieldCheck, label: 'Compliance Rating', value: '90.0%', color: 'text-amber-400' },
+            { icon: TrendingUp, label: 'Performance Index', value: performanceIndex, color: 'text-emerald-400' },
+            { icon: ShieldCheck, label: 'Compliance Rating', value: complianceRating, color: 'text-amber-400' },
           ].map(({ icon: Icon, label, value, color }) => (
             <div key={label} className="relative overflow-hidden rounded-xl border border-border/40 bg-background/40 p-6 shadow-xl backdrop-blur-md transition-all hover:border-primary/30 group">
               <div className="absolute top-0 right-0 h-16 w-16 opacity-[0.03] transition-opacity group-hover:opacity-10">
@@ -85,6 +141,8 @@ const Dashboard = () => {
             </div>
           ))}
         </div>
+
+
 
         <div className="mb-12">
           <Button size="lg" className="h-14 gap-3 bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-500 rounded-xl px-10 text-sm font-bold uppercase tracking-widest shadow-[0_0_25px_-5px_rgba(var(--primary),0.5)] transition-all hover:scale-[1.01] active:scale-[0.98]" onClick={() => navigate('/setup')}>

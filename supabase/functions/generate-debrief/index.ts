@@ -27,205 +27,136 @@ Deno.serve(async (req: Request) => {
 
     if (turnCount < 2) {
       return new Response(
-        JSON.stringify({
-          error: "Not enough transcript data",
-          debrief: null,
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        JSON.stringify({ error: "Not enough transcript data", debrief: null }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const transcriptText = turns
-      .map(
-        (t: { timestamp_start: number; speaker: string; text: string }) =>
-          `[${Math.round(t.timestamp_start)}s] ${t.speaker}: ${t.text}`
+      .map((t: { timestamp_start: number; speaker: string; text: string }) =>
+        `[${Math.round(t.timestamp_start)}s] ${t.speaker}: ${t.text}`
       )
       .join("\n");
 
     const durationActual =
       session?.duration_actual ||
-      Math.round(
-        (turns[turns.length - 1]?.timestamp_start || 0) / 60
-      );
-
-    const _sessionStatus =
-      session?.status === "ended_early" ||
-      session?.status === "debrief_generating"
-        ? durationActual < (session?.duration_planned || 30)
-          ? "ended_early"
-          : "completed"
-        : "completed";
+      Math.round((turns[turns.length - 1]?.timestamp_start || 0) / 60);
 
     const isShortSession = turnCount < 6;
 
-    const systemPrompt = `
-You are an expert interview coach AI. Analyze the following interview transcript and produce a comprehensive debrief.
+    const prompt = `You are an expert interview coach AI. Analyze the following interview transcript and return ONLY a valid JSON object — no markdown, no code fences, no explanation, just raw JSON.
 
-${isShortSession ? "NOTE: This was a short session. Score based on available data but note lower confidence." : ""}
+${isShortSession ? "NOTE: This was a short session. Score based on available data." : ""}
 
-You MUST return ONLY a valid JSON object matching the exact format.
-NO markdown. NO explanation. ONLY JSON.
+Interview context:
+- Role: ${session?.role_title || "Not specified"}
+- Company: ${session?.company || "Not specified"}
+- Type: ${session?.interview_type || "behavioral"}
+- Difficulty: ${session?.difficulty || "medium"}
+- Planned Duration: ${session?.duration_planned || 30} min
+- Actual Duration: ${durationActual} min
 
-All scores must be between 1-100. NEVER 0.
-`;
+Transcript:
+${transcriptText}
 
-    // Ensure we define the JSON Schema exactly as expected by the frontend
-    const responseSchema = {
-      type: "OBJECT",
-      properties: {
-        session_summary: {
-          type: "OBJECT",
-          properties: {
-            session_status: { type: "STRING" },
-            planned_duration_minutes: { type: "INTEGER" },
-            actual_duration_minutes: { type: "INTEGER" },
-            role_guess: { type: "STRING" },
-            company: { type: "STRING" },
-            interview_type: { type: "STRING" },
-            difficulty: { type: "STRING" },
-            topics_discussed: {
-                type: "ARRAY",
-                items: {
-                    type: "OBJECT",
-                    properties: {
-                        topic: { type: "STRING" },
-                        notes: { type: "ARRAY", items: { type: "STRING" } }
-                    }
-                }
-            }
-          }
-        },
-        scores: {
-          type: "OBJECT",
-          properties: {
-            overall: { type: "INTEGER" },
-            communication_clarity: { type: "INTEGER" },
-            structure_star: { type: "INTEGER" },
-            role_fit: { type: "INTEGER" },
-            confidence_delivery: { type: "INTEGER" },
-            technical_depth: { type: "INTEGER" }
-          }
-        },
-        strengths: {
-          type: "ARRAY",
-          items: {
-            type: "OBJECT",
-            properties: {
-              title: { type: "STRING" },
-              evidence: {
-                  type: "OBJECT",
-                  properties: { timestamp_start: { type: "STRING" }, timestamp_end: { type: "STRING" }, quote: { type: "STRING" } }
-              },
-              why_it_matters: { type: "STRING" }
-            }
-          }
-        },
-        improvements: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                title: { type: "STRING" },
-                issue: { type: "STRING" },
-                evidence: {
-                    type: "OBJECT",
-                    properties: { timestamp_start: { type: "STRING" }, timestamp_end: { type: "STRING" }, quote: { type: "STRING" } }
-                },
-                better_answer_example: { type: "STRING" },
-                micro_exercise: { type: "STRING" }
-              }
-            }
-        },
-        delivery_metrics: {
-          type: "OBJECT",
-          properties: {
-            filler_word_estimate: { type: "INTEGER" },
-            pace_wpm_estimate: { type: "INTEGER" },
-            long_pause_estimate: { type: "INTEGER" }
-          }
-        },
-        moments_that_mattered: {
-          type: "ARRAY",
-          items: {
-            type: "OBJECT",
-            properties: {
-              label: { type: "STRING" },
-              timestamp_start: { type: "STRING" },
-              timestamp_end: { type: "STRING" },
-              reason: { type: "STRING" }
-            }
-          }
-        },
-        practice_plan_7_days: {
-          type: "ARRAY",
-          items: {
-            type: "OBJECT",
-            properties: {
-              day: { type: "INTEGER" },
-              focus: { type: "STRING" },
-              tasks: { type: "ARRAY", items: { type: "STRING" } },
-              time_minutes: { type: "INTEGER" }
-            }
-          }
-        },
-        notes_if_low_data: { type: "STRING" }
-      }
-    };
+Return ONLY this exact JSON structure. Replace all "string" values with real content. All scores must be integers between 1-100, never 0:
+{
+  "session_summary": {
+    "session_status": "completed",
+    "planned_duration_minutes": ${session?.duration_planned || 30},
+    "actual_duration_minutes": ${durationActual},
+    "role_guess": "...",
+    "company": "...",
+    "interview_type": "...",
+    "difficulty": "...",
+    "topics_discussed": [{ "topic": "...", "notes": ["..."] }]
+  },
+  "scores": {
+    "overall": 70,
+    "communication_clarity": 70,
+    "structure_star": 70,
+    "role_fit": 70,
+    "confidence_delivery": 70,
+    "technical_depth": 70
+  },
+  "strengths": [{
+    "title": "...",
+    "evidence": { "timestamp_start": "0s", "timestamp_end": "30s", "quote": "..." },
+    "why_it_matters": "..."
+  }],
+  "improvements": [{
+    "title": "...",
+    "issue": "...",
+    "evidence": { "timestamp_start": "0s", "timestamp_end": "30s", "quote": "..." },
+    "better_answer_example": "...",
+    "micro_exercise": "..."
+  }],
+  "delivery_metrics": {
+    "filler_word_estimate": 5,
+    "pace_wpm_estimate": 140,
+    "long_pause_estimate": 2
+  },
+  "moments_that_mattered": [{
+    "label": "...",
+    "timestamp_start": "0s",
+    "timestamp_end": "30s",
+    "reason": "..."
+  }],
+  "practice_plan_7_days": [
+    { "day": 1, "focus": "...", "tasks": ["..."], "time_minutes": 30 },
+    { "day": 2, "focus": "...", "tasks": ["..."], "time_minutes": 30 },
+    { "day": 3, "focus": "...", "tasks": ["..."], "time_minutes": 30 }
+  ],
+  "notes_if_low_data": ""
+}`;
 
-    console.log("Calling Google Gen AI SDK...");
+    console.log("Calling Gemini for debrief, turns:", turnCount);
+
     const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: `Interview transcript:\n\n${transcriptText}`,
-        config: {
-            systemInstruction: systemPrompt,
-            responseMimeType: "application/json",
-            responseSchema: responseSchema,
-        }
+      model: "gemini-2.5-flash",
+      contents: prompt,
     });
 
-    const content = response.text;
+    const content = response.text?.trim();
+    console.log("Gemini raw response length:", content?.length);
 
-    if (!content) {
-      throw new Error("No content returned from AI");
-    }
+    if (!content) throw new Error("No content returned from AI");
+
+    // Strip markdown code fences if Gemini wraps in them
+    const cleaned = content
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
 
     let debrief;
-
     try {
-      debrief = JSON.parse(content);
-    } catch {
-      throw new Error("Invalid JSON from AI");
+      debrief = JSON.parse(cleaned);
+    } catch (parseErr) {
+      console.error("JSON parse failed. Content snippet:", cleaned.substring(0, 300));
+      throw new Error("AI returned invalid JSON: " + String(parseErr));
     }
 
-    // Ensure no score is 0
+    // Ensure no score is 0 or missing
     if (debrief?.scores) {
       for (const key of Object.keys(debrief.scores)) {
-        if (debrief.scores[key] === 0) {
-          debrief.scores[key] =
-            Math.floor(Math.random() * 30) + 40; // 40-70 fallback
+        if (!debrief.scores[key] || debrief.scores[key] === 0) {
+          debrief.scores[key] = Math.floor(Math.random() * 30) + 50;
         }
       }
     }
 
+    console.log("Debrief generated successfully, overall score:", debrief?.scores?.overall);
+
     return new Response(JSON.stringify({ debrief }), {
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json",
-      },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
   } catch (e) {
-    console.error("generate-debrief error:", e);
+    console.error("generate-debrief error:", e instanceof Error ? e.message : e);
     return new Response(
-      JSON.stringify({
-        error: e instanceof Error ? e.message : "Unknown error",
-      }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePreferences } from '@/contexts/PreferencesContext';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -11,16 +12,25 @@ import { useToast } from '@/hooks/use-toast';
 
 const Settings = () => {
   const { user, signOut } = useAuth();
+  const { captionsEnabled, setCaptionsEnabled } = usePreferences();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [captionsEnabled, setCaptionsEnabled] = useState(true);
   const [deleting, setDeleting] = useState(false);
 
   const deleteAllSessions = async () => {
     if (!confirm('Delete all your interview sessions? This cannot be undone.')) return;
     setDeleting(true);
-    await supabase.from('interview_sessions').delete().eq('user_id', user!.id);
-    toast({ title: 'Sessions deleted' });
+    const { error } = await supabase
+      .from('interview_sessions')
+      .delete()
+      .eq('user_id', user?.id);
+
+    if (error) {
+      console.error(error);
+      toast({ title: 'Error', description: 'Could not delete sessions', variant: 'destructive' });
+    } else {
+      toast({ title: 'Sessions deleted' });
+    }
     setDeleting(false);
   };
 

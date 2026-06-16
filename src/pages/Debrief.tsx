@@ -29,27 +29,26 @@ const Debrief = () => {
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
 
   const fetchDebrief = async () => {
-    // Check for existing debrief
-    const { data: existing } = await supabase
+    // Check for existing session_debriefs
+    const { data: results, error: resultsError } = await supabase
       .from('session_debriefs')
-      .select('debrief_json')
-      .eq('session_id', id!)
-      .single();
+      .select('*')
+      .eq('session_id', id!);
 
-    if (existing?.debrief_json && Object.keys(existing.debrief_json as object).length > 1) {
-      setDebrief(existing.debrief_json as unknown as DebriefJSON);
-      setLoading(false);
-      return;
+    const existing = results && results.length > 0 ? results[0] : null;
+
+    if (existing?.debrief_json && typeof existing.debrief_json === 'object') {
+      const rawReport = existing.debrief_json as Record<string, any>;
+      if (rawReport.debrief && Object.keys(rawReport.debrief).length > 1) {
+        setDebrief(rawReport.debrief as DebriefJSON);
+        setLoading(false);
+        return;
+      }
     }
 
-    // Fetch transcript
-    const { data: turns } = await supabase
-      .from('transcript_turns')
-      .select('*')
-      .eq('session_id', id!)
-      .order('turn_index', { ascending: true });
-
-    const tt = (turns || []) as TranscriptTurn[];
+    // Extract transcript turns from existing debrief_json
+    const rawReport = (existing?.debrief_json as Record<string, any>) || {};
+    const tt = (rawReport.transcript_turns || []) as TranscriptTurn[];
     setTranscript(tt);
 
     if (tt.length < 2) {
@@ -59,58 +58,84 @@ const Debrief = () => {
     }
 
     // Generate debrief
-    await generateDebrief(tt);
+    await generateDebrief(tt, rawReport);
   };
 
-  const generateDebrief = async (turns?: TranscriptTurn[]) => {
+  const generateDebrief = async (turns?: TranscriptTurn[], existingRawReport?: any) => {
     setGenerating(true);
     setError(null);
     const turnsToUse = turns || transcript;
 
-    // Fetch session info
-    const { data: sessionData } = await supabase
+    // Fetch session info from interview_sessions
+    const { data: rawSession, error: sessionError } = await supabase
       .from('interview_sessions')
       .select('*')
       .eq('id', id!)
       .single();
 
     try {
-      const { data, error: fnErr } = await supabase.functions.invoke('generate-debrief', {
+      if (sessionError || !rawSession) throw new Error('Could not fetch session info');
+
+      const sessionData = {
+        id: rawSession.id,
+        status: rawSession.status,
+        duration_planned: rawSession.duration_planned || 30,
+        duration_actual: rawSession.duration_actual || undefined,
+        interview_type: rawSession.interview_type || 'behavioral',
+        difficulty: rawSession.difficulty || 'medium',
+        company: rawSession.company || '',
+        role_title: rawSession.role_title || '',
+      };
+
+      const { data, error: functionError } = await supabase.functions.invoke('generate-debrief', {
         body: {
           session: sessionData,
           transcript_turns: turnsToUse,
-        },
+        }
       });
+      if (functionError) throw functionError;
 
-      if (fnErr) throw fnErr;
       if (!data?.debrief) throw new Error('No debrief returned');
 
       const debriefData = data.debrief as DebriefJSON;
       setDebrief(debriefData);
 
-      // Save to DB
-      const { data: existingDebrief } = await supabase
-        .from('session_debriefs')
-        .select('id')
-        .eq('session_id', id!)
-        .single();
-
-      if (existingDebrief) {
-        await supabase.from('session_debriefs').update({
-          debrief_json: debriefData as any,
-        }).eq('session_id', id!);
-      } else {
-        await supabase.from('session_debriefs').insert({
-          session_id: id!,
-          debrief_json: debriefData as any,
-        });
+      // Resolve raw report content
+      let activeRawReport = existingRawReport;
+      if (!activeRawReport) {
+        const { data: results } = await supabase
+          .from('session_debriefs')
+          .select('debrief_json')
+          .eq('session_id', id!)
+          .single();
+        activeRawReport = results?.debrief_json || {};
       }
 
-      // Update session status
-      await supabase.from('interview_sessions').update({ status: 'done' }).eq('id', id!);
+      const mergedDebriefJson = {
+        ...(activeRawReport || {}),
+        transcript_turns: turnsToUse,
+        debrief: debriefData
+      };
+
+      await supabase
+        .from('session_debriefs')
+        .upsert({
+          session_id: id!,
+          debrief_json: mergedDebriefJson
+        }, { onConflict: 'session_id' });
+
+      // Update session status to done
+      await supabase
+        .from('interview_sessions')
+        .update({ status: 'done' })
+        .eq('id', id!);
     } catch (e: any) {
+      console.error(e);
       setError(e.message || 'Failed to generate debrief');
-      await supabase.from('interview_sessions').update({ status: 'failed' }).eq('id', id!);
+      await supabase
+        .from('interview_sessions')
+        .update({ status: 'failed' })
+        .eq('id', id!);
     }
     setGenerating(false);
     setLoading(false);
@@ -124,14 +149,27 @@ const Debrief = () => {
     return 'text-destructive';
   };
 
-  if (loading || generating) {
+  if (generating) {
     return (
       <div className="relative min-h-screen noise-bg">
         <AuroraBackground />
         <div className="relative z-10 flex min-h-screen flex-col items-center justify-center gap-4">
           <div className="h-12 w-12 animate-spin rounded-full border-3 border-primary border-t-transparent" />
           <h2 className="font-display text-heading">Generating Debrief…</h2>
-          <p className="text-sm text-muted-foreground">Analyzing your interview performance</p>
+          <p className="text-sm text-muted-foreground">Analyzing your interview performance with AI</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="relative min-h-screen noise-bg">
+        <AuroraBackground />
+        <div className="relative z-10 flex min-h-screen flex-col items-center justify-center gap-4">
+          <div className="h-12 w-12 animate-spin rounded-full border-3 border-primary border-t-transparent" />
+          <h2 className="font-display text-heading">Loading Debrief…</h2>
+          <p className="text-sm text-muted-foreground">Retrieving your assessment results</p>
         </div>
       </div>
     );
@@ -149,7 +187,7 @@ const Debrief = () => {
             <Button onClick={() => { setLoading(true); fetchDebrief(); }}>
               <RotateCcw className="mr-1 h-4 w-4" /> Retry
             </Button>
-            <Button variant="outline" onClick={() => navigate('/dashboard')}>
+            <Button variant="outline" onClick={() => navigate('/dashboard', { replace: true })}>
               Back to Dashboard
             </Button>
           </div>
@@ -165,7 +203,7 @@ const Debrief = () => {
       <AuroraBackground />
       <div className="relative z-10 mx-auto max-w-[1100px] px-4 py-8">
         <div className="mb-6 flex items-center justify-between">
-          <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <button onClick={() => navigate('/dashboard', { replace: true })} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Dashboard
           </button>
           <Button variant="outline" size="sm" onClick={() => generateDebrief()}>

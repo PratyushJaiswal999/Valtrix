@@ -1,8 +1,16 @@
 import { useAuth } from '@/contexts/AuthContext';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, loading } = useAuth();
+type UserRole = 'candidate' | 'recruiter';
+
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+  requiredRole?: UserRole;
+}
+
+const ProtectedRoute = ({ children, requiredRole }: ProtectedRouteProps) => {
+  const { user, loading, userRole, profileComplete } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -12,7 +20,19 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     );
   }
 
+  // Not logged in → go to auth
   if (!user) return <Navigate to="/auth" replace />;
+
+  // Profile incomplete → send to onboarding (unless already there)
+  if (!profileComplete && location.pathname !== '/onboarding') {
+    return <Navigate to="/onboarding" replace />;
+  }
+
+  // Role-gated route
+  if (requiredRole && userRole && userRole !== requiredRole) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
   return <>{children}</>;
 };
 

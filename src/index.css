@@ -6,52 +6,53 @@
 
 @layer base {
   :root {
-    --background: 220 20% 97%;
-    --foreground: 230 25% 10%;
+    /* Warm cream/parchment base — easy on the eyes */
+    --background: 38 30% 96%;      /* #F5F0EB warm ivory */
+    --foreground: 230 25% 12%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 230 25% 10%;
+    --card: 36 40% 98%;            /* slightly warmer white cards */
+    --card-foreground: 230 25% 12%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 230 25% 10%;
+    --popover: 36 40% 98%;
+    --popover-foreground: 230 25% 12%;
 
-    --primary: 230 85% 60%;
+    --primary: 230 85% 58%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 15% 92%;
+    --secondary: 35 25% 90%;       /* warm grey-beige */
     --secondary-foreground: 230 25% 15%;
 
-    --muted: 220 15% 94%;
-    --muted-foreground: 220 10% 45%;
+    --muted: 36 20% 92%;           /* warm muted bg */
+    --muted-foreground: 220 10% 48%;
 
-    --accent: 165 55% 42%;
+    --accent: 165 50% 40%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 72% 55%;
+    --destructive: 0 70% 54%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 15% 90%;
-    --input: 220 15% 90%;
-    --ring: 230 85% 60%;
+    --border: 35 20% 86%;          /* warm-tinted borders */
+    --input: 35 20% 88%;
+    --ring: 230 85% 58%;
 
     --radius: 1.125rem;
 
-    --sidebar-background: 0 0% 98%;
+    --sidebar-background: 36 35% 97%;
     --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 230 85% 60%;
+    --sidebar-primary: 230 85% 58%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent: 36 25% 93%;
     --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 230 85% 60%;
+    --sidebar-border: 35 20% 88%;
+    --sidebar-ring: 230 85% 58%;
 
-    /* Custom tokens */
-    --glass-bg: 0 0% 100% / 0.7;
-    --glass-border: 0 0% 100% / 0.5;
-    --shadow-soft: 0 8px 32px -8px hsl(230 25% 10% / 0.08);
-    --shadow-card: 0 4px 24px -4px hsl(230 25% 10% / 0.06);
-    --shadow-glow: 0 0 40px -10px hsl(230 85% 60% / 0.15);
-    --success: 165 55% 42%;
+    /* Custom tokens — warm glass */
+    --glass-bg: 38 50% 99% / 0.72;
+    --glass-border: 38 30% 90% / 0.6;
+    --shadow-soft: 0 8px 32px -8px hsl(35 25% 20% / 0.10);
+    --shadow-card: 0 4px 24px -4px hsl(35 25% 20% / 0.07);
+    --shadow-glow: 0 0 40px -10px hsl(230 85% 60% / 0.12);
+    --success: 165 50% 40%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
@@ -173,39 +174,54 @@
   z-index: 0;
 }
 
+/* ─── Aurora blobs — light mode: warm lavender, rose, mint ─── */
 .aurora-blob {
   position: absolute;
   border-radius: 50%;
   filter: blur(100px);
-  opacity: 0.08;
+  opacity: 0.10;
   animation: aurora-shift 20s ease-in-out infinite;
+}
+
+/* Dark mode blobs stay darker/more vivid */
+.dark .aurora-blob {
+  opacity: 0.08;
 }
 
 .aurora-blob-1 {
   width: 600px;
   height: 600px;
-  background: hsl(230 85% 60%);
+  background: hsl(250 80% 72%);  /* soft lavender-periwinkle */
   top: -10%;
   right: -5%;
   animation-delay: 0s;
+}
+.dark .aurora-blob-1 {
+  background: hsl(230 85% 60%);
 }
 
 .aurora-blob-2 {
   width: 500px;
   height: 500px;
-  background: hsl(165 55% 42%);
+  background: hsl(340 70% 75%);  /* soft rose-blush */
   bottom: -10%;
   left: -5%;
   animation-delay: -7s;
+}
+.dark .aurora-blob-2 {
+  background: hsl(165 55% 42%);
 }
 
 .aurora-blob-3 {
   width: 400px;
   height: 400px;
-  background: hsl(230 90% 75%);
+  background: hsl(185 60% 68%);  /* soft sky-mint */
   top: 40%;
   left: 30%;
   animation-delay: -14s;
+}
+.dark .aurora-blob-3 {
+  background: hsl(230 90% 75%);
 }
 
 /* Speaking ring animation */
@@ -265,4 +281,53 @@
 
 .animate-fade-slide-up {
   animation: fade-slide-up 0.4s ease-out forwards;
+}
+
+/* ══════════════════════════════════════
+   AI AVATAR ANIMATIONS
+══════════════════════════════════════ */
+
+/* Idle breathing — subtle scale pulse */
+@keyframes avatar-breathe {
+  0%, 100% { transform: scale(1) translateY(0); }
+  50%       { transform: scale(1.012) translateY(-2px); }
+}
+
+/* Speaking — slight upward head-bob in sync with voice */
+@keyframes avatar-bob {
+  0%   { transform: translateY(0px) rotate(-0.5deg); }
+  100% { transform: translateY(-4px) rotate(0.5deg); }
+}
+
+/* Listening / concentrating — very slight forward tilt */
+@keyframes avatar-tilt {
+  0%   { transform: rotate(-1deg) scale(1.005); }
+  100% { transform: rotate(1deg)  scale(1.005); }
+}
+
+/* Blink — eyelid comes down from top, very fast */
+@keyframes avatar-blink {
+  /* eyelid closed for a tiny window at ~94-96% and ~97-99% (double blink) */
+  0%,  93%,  100% { transform: scaleY(0); }
+  94.5%, 95.5%    { transform: scaleY(1); }
+  97.5%, 98.5%    { transform: scaleY(1); }
+}
+
+/* Apply to both eye blink overlays */
+.avatar-blink-l {
+  transform-origin: 60px 80px; /* top edge of left eye */
+  animation: avatar-blink 4.2s ease-in-out infinite;
+  transform: scaleY(0);
+}
+.avatar-blink-r {
+  transform-origin: 100px 80px; /* top edge of right eye */
+  animation: avatar-blink 4.2s ease-in-out infinite;
+  animation-delay: 0.06s; /* tiny offset so both eyes blink in near-unison */
+  transform: scaleY(0);
+}
+
+/* Subtle shimmer glow on photo during speaking */
+@keyframes avatar-speaking-glow {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
 }

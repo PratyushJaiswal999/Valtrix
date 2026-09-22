@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import type { InterviewSession, TranscriptTurn } from '@/types/interview';
-import { Mic, MicOff, Square, MessageSquare, Clock, Send, BookmarkPlus, ChevronRight } from 'lucide-react';
+import { Mic, MicOff, Square, MessageSquare, Clock, Send } from 'lucide-react';
+import AIAvatar, { type AvatarState } from '@/components/AIAvatar';
 
 const InterviewRoom = () => {
   const { id } = useParams<{ id: string }>();
@@ -106,8 +107,14 @@ const InterviewRoom = () => {
   }, []);
 
   useEffect(() => {
-    if (candidateStream && candidateVideoRef.current) {
-      candidateVideoRef.current.srcObject = candidateStream;
+    const video = candidateVideoRef.current;
+    if (!video) return;
+    if (candidateStream) {
+      video.srcObject = candidateStream;
+      // Ensure autoplay fires (needed on some browsers after srcObject set)
+      video.play().catch(() => { /* autoplay policy — muted video should always be allowed */ });
+    } else {
+      video.srcObject = null;
     }
   }, [candidateStream]);
 
@@ -326,90 +333,151 @@ const InterviewRoom = () => {
   );
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      {/* Top bar */}
-      <header className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-3">
-          <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium capitalize text-primary">{session.interview_type}</span>
-          <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium capitalize">{session.difficulty}</span>
+    <div className="flex h-screen flex-col bg-background overflow-hidden">
+
+      {/* ── Top bar ── */}
+      <header className="flex items-center justify-between border-b border-border/50 px-5 py-2.5 bg-card/80 backdrop-blur-sm shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 shadow shadow-blue-500/30">
+            <span className="text-[11px]">🎙</span>
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-foreground leading-none">AI Interviewer</p>
+            <p className="text-[9px] text-muted-foreground capitalize mt-0.5">
+              {session.interview_type} · {session.difficulty}{session.role_title ? ` · ${session.role_title}` : ''}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2 font-mono text-sm">
-          <Clock className="h-4 w-4 text-muted-foreground" />
-          <span>{formatTime(elapsed)}</span>
-          <span className="text-muted-foreground">/ {session.duration_planned}:00</span>
+
+        {/* Timer */}
+        <div className="flex items-center gap-2 font-mono text-sm font-semibold">
+          <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className={elapsed > session.duration_planned * 60 * 0.9 ? 'text-destructive' : 'text-foreground'}>
+            {formatTime(elapsed)}
+          </span>
+          <span className="text-muted-foreground text-xs">/ {session.duration_planned}:00</span>
         </div>
-        <Button variant="destructive" size="sm" onClick={endInterview} disabled={ending}>
-          <Square className="mr-1 h-3 w-3" /> End
+
+        <Button variant="destructive" size="sm" className="h-8 px-4 text-xs font-bold rounded-lg" onClick={endInterview} disabled={ending}>
+          <Square className="mr-1 h-3 w-3" /> End Interview
         </Button>
       </header>
 
-      {/* Interview area */}
-      <div className="flex flex-1 flex-col">
-        {/* Interview area split-screen */}
-        <div className="flex flex-col md:flex-row gap-6 max-w-[850px] mx-auto w-full px-4 py-6">
-          {/* Left Pane: Interviewer */}
-          <div className="flex-1 glass border border-border/40 rounded-2xl p-6 flex flex-col items-center justify-center min-h-[220px] md:h-[240px] shadow-card relative">
-            <div className={`flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-2xl transition-all ${
-              interviewerSpeaking ? 'speaking-ring' : ''
-            }`}>
-              👤
-            </div>
-            <div className="text-center mt-3">
-              <p className="font-display font-semibold text-foreground">Interviewer</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {interviewerSpeaking ? 'Speaking…' : waitingForAI ? 'Thinking…' : currentSpeaker === 'Candidate' ? 'Listening to you' : 'Standby'}
-               </p>
-            </div>
-            
-            {/* Waveform */}
-            {interviewerSpeaking ? (
-              <div className="flex items-center gap-1 mt-4 h-6">
-                {[...Array(5)].map((_, i) => (
-                  <div
-                    key={i}
-                    className="w-1 rounded-full bg-primary"
-                    style={{
-                      height: '4px',
-                      animation: `waveform-bar 0.6s ease-in-out ${i * 0.1}s infinite`,
-                    }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="h-6 mt-4 flex items-center justify-center">
-                <span className="text-[10px] text-muted-foreground/45 tracking-widest font-mono">STANDBY</span>
-              </div>
-            )}
-          </div>
+      {/* ── Main body: left column + right column ── */}
+      <div className="flex flex-1 overflow-hidden">
 
-          {/* Right Pane: Candidate Video Feed */}
-          <div className="flex-1 glass border border-border/40 rounded-2xl p-6 flex flex-col items-center justify-center min-h-[220px] md:h-[240px] shadow-card relative overflow-hidden bg-black/30">
-            {candidateStream ? (
-              <video
-                ref={candidateVideoRef}
-                autoPlay
-                playsInline
-                muted
-                className="absolute inset-0 w-full h-full object-cover scale-x-[-1] opacity-90 transition-opacity duration-300"
-              />
-            ) : (
-              <div className="flex flex-col items-center text-center text-muted-foreground p-4">
-                <div className="h-10 w-10 rounded-full bg-destructive/15 flex items-center justify-center text-destructive mb-2">📷</div>
-                <p className="font-medium text-xs text-foreground">Camera Offline</p>
-                <p className="text-[10px] text-muted-foreground max-w-[150px] mt-0.5">Check browser camera permissions.</p>
+        {/* ═══ LEFT COLUMN — video panels stacked ═══ */}
+        <div className="flex flex-col gap-3 p-3 shrink-0" style={{ width: '420px' }}>
+
+          {/* AI Interviewer panel — live animated avatar */}
+          {(() => {
+            const avatarState: AvatarState = interviewerSpeaking
+              ? 'speaking'
+              : waitingForAI
+              ? 'thinking'
+              : currentSpeaker === 'Candidate'
+              ? 'listening'
+              : 'idle';
+            return (
+              <div className="flex-1 rounded-2xl border border-border/40 bg-card/60 backdrop-blur-md shadow-card flex flex-col items-center justify-center relative overflow-hidden">
+                {/* Dynamic ambient gradient based on state */}
+                <div className={`absolute inset-0 transition-all duration-700 ${
+                  interviewerSpeaking
+                    ? 'bg-gradient-to-br from-blue-500/8 via-transparent to-cyan-500/8'
+                    : waitingForAI
+                    ? 'bg-gradient-to-br from-amber-500/6 via-transparent to-orange-400/6'
+                    : currentSpeaker === 'Candidate'
+                    ? 'bg-gradient-to-br from-emerald-500/6 via-transparent to-teal-400/6'
+                    : 'bg-gradient-to-br from-slate-500/4 via-transparent to-slate-400/4'
+                }`} />
+
+                {/* Live avatar — portrait ratio matches the photos */}
+                <div className="relative w-full px-5" style={{ aspectRatio: '3/4', maxHeight: '260px' }}>
+                  <AIAvatar state={avatarState} className="w-full h-full" />
+
+                  {/* Speaking pulse ring around avatar */}
+                  {interviewerSpeaking && (
+                    <div className="absolute inset-0 rounded-full pointer-events-none"
+                      style={{
+                        boxShadow: '0 0 0 0 rgba(96,165,250,0.5)',
+                        animation: 'speaking-ring 1.2s ease-in-out infinite',
+                      }}
+                    />
+                  )}
+                </div>
+
+                {/* Status label */}
+                <div className="text-center mt-3 relative z-10">
+                  <p className="font-display font-bold text-sm text-foreground tracking-tight">AI Interviewer</p>
+                  <p className={`text-[11px] mt-1 font-semibold transition-colors duration-300 ${
+                    interviewerSpeaking ? 'text-blue-400'
+                    : waitingForAI     ? 'text-amber-400'
+                    : currentSpeaker === 'Candidate' ? 'text-emerald-400'
+                    : 'text-muted-foreground'
+                  }`}>
+                    {interviewerSpeaking
+                      ? '🔴 Speaking'
+                      : waitingForAI
+                      ? '💭 Thinking…'
+                      : currentSpeaker === 'Candidate'
+                      ? '👂 Listening'
+                      : '⏸ Standby'}
+                  </p>
+                </div>
+
+                {/* Waveform — only during speech */}
+                <div className="mt-3 flex items-end gap-1 h-5">
+                  {[...Array(9)].map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-0.5 rounded-full transition-colors ${
+                        interviewerSpeaking ? 'bg-blue-400' : 'bg-border/40'
+                      }`}
+                      style={{
+                        height: '4px',
+                        animation: interviewerSpeaking
+                          ? `waveform-bar 0.55s ease-in-out ${i * 0.07}s infinite`
+                          : 'none',
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* My Camera Feed panel */}
+          <div className="flex-1 rounded-2xl border border-border/40 bg-black/60 shadow-card relative overflow-hidden">
+            {/* Always-mounted video — srcObject set via ref */}
+            <video
+              ref={candidateVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`absolute inset-0 w-full h-full object-cover scale-x-[-1] transition-opacity duration-500 ${
+                candidateStream ? 'opacity-95' : 'opacity-0'
+              }`}
+            />
+
+            {/* Fallback when no camera */}
+            {!candidateStream && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground">
+                <div className="h-12 w-12 rounded-full bg-destructive/15 flex items-center justify-center text-2xl mb-2">📷</div>
+                <p className="text-xs font-medium text-foreground">Camera Offline</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-0.5 text-center px-4">Allow camera access in browser</p>
               </div>
             )}
-            
-            {/* Candidate Status Overlay */}
-            <div className="absolute bottom-3 left-3 right-3 z-20 flex justify-between items-center bg-background/80 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-border/40 text-[10px] shadow-sm">
-              <span className="font-bold text-foreground">You</span>
-              <div className="flex items-center gap-2">
-                <span className="flex items-center gap-0.5 text-muted-foreground font-semibold">
-                  <span className={`h-1.5 w-1.5 rounded-full ${candidateStream ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+
+            {/* Status bar */}
+            <div className="absolute bottom-2.5 left-2.5 right-2.5 z-20 flex justify-between items-center bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-xl text-[10px] border border-white/10">
+              <span className="font-bold text-white">You</span>
+              <div className="flex items-center gap-3">
+                <span className="flex items-center gap-1 text-white/70 font-medium">
+                  <span className={`h-1.5 w-1.5 rounded-full ${candidateStream ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
                   Cam
                 </span>
-                <span className="flex items-center gap-0.5 text-muted-foreground font-semibold">
-                  <span className={`h-1.5 w-1.5 rounded-full ${isListening ? 'bg-emerald-500 animate-pulse' : 'bg-muted'}`} />
+                <span className="flex items-center gap-1 text-white/70 font-medium">
+                  <span className={`h-1.5 w-1.5 rounded-full ${isListening ? 'bg-emerald-400 animate-pulse' : 'bg-white/20'}`} />
                   Mic
                 </span>
               </div>
@@ -417,85 +485,117 @@ const InterviewRoom = () => {
           </div>
         </div>
 
-        {/* Transcript / Captions */}
-        <div className="mx-auto max-w-[700px] flex-1 overflow-auto px-4">
-          {captionsEnabled ? (
-            <div className="space-y-3 pb-4">
+        {/* ═══ RIGHT COLUMN — full Q&A panel ═══ */}
+        <div className="flex flex-1 flex-col border-l border-border/40 overflow-hidden">
+
+          {/* Transcript — scrollable */}
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+            {transcript.length === 0 && !waitingForAI && (
+              <div className="flex h-full items-center justify-center opacity-40">
+                <div className="text-center">
+                  <p className="text-2xl mb-2">🎤</p>
+                  <p className="text-sm font-medium text-muted-foreground">Interview starting…</p>
+                </div>
+              </div>
+            )}
+
             {transcript.map((t, i) => (
               <div key={i} className={`flex gap-3 animate-fade-slide-up ${t.speaker === 'Candidate' ? 'flex-row-reverse' : ''}`}>
-                <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
+                {/* Avatar */}
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm border ${
                   t.speaker === 'Candidate'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'glass'
+                    ? 'bg-primary/10 border-primary/20 text-primary'
+                    : 'bg-muted border-border/40 text-muted-foreground'
                 }`}>
-                  <p className="mb-1 text-xs font-medium opacity-70">{t.speaker === 'Candidate' ? 'You' : 'Interviewer'}</p>
+                  {t.speaker === 'Candidate' ? '👤' : '🤖'}
+                </div>
+
+                {/* Bubble */}
+                <div className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                  t.speaker === 'Candidate'
+                    ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                    : 'bg-muted/60 border border-border/40 text-foreground rounded-tl-sm'
+                }`}>
+                  <p className={`mb-1.5 text-[10px] font-bold uppercase tracking-widest ${
+                    t.speaker === 'Candidate' ? 'text-primary-foreground/60' : 'text-muted-foreground'
+                  }`}>
+                    {t.speaker === 'Candidate' ? 'You' : 'Interviewer'}
+                  </p>
                   <p>{t.text}</p>
                 </div>
               </div>
             ))}
+
+            {/* AI thinking indicator */}
             {waitingForAI && (
-              <div className="flex gap-3">
-                <div className="glass rounded-2xl px-4 py-3 text-sm">
-                  <div className="flex gap-1">
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: '0ms' }} />
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: '150ms' }} />
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: '300ms' }} />
+              <div className="flex gap-3 animate-fade-slide-up">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted border border-border/40 text-sm">🤖</div>
+                <div className="bg-muted/60 border border-border/40 rounded-2xl rounded-tl-sm px-5 py-3.5">
+                  <div className="flex gap-1.5 items-center">
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-primary/60" style={{ animationDelay: '0ms' }} />
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-primary/60" style={{ animationDelay: '150ms' }} />
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-primary/60" style={{ animationDelay: '300ms' }} />
                   </div>
                 </div>
               </div>
             )}
           </div>
-          ) : (
-            <div className="flex h-full items-center justify-center opacity-50">
-              <div className="flex flex-col items-center gap-2">
-                <MicOff className="h-8 w-8 text-muted-foreground" />
-                <p className="text-sm font-medium text-muted-foreground">Captions Disabled</p>
-                <p className="text-xs text-muted-foreground">You can enable them in Settings</p>
-              </div>
-            </div>
-          )}
-        </div>
 
-        {/* Input area */}
-        <div className="border-t bg-card p-4">
-          <div className="mx-auto flex max-w-[700px] items-center gap-3">
-            {textMode ? (
-              <form onSubmit={handleTextSubmit} className="flex flex-1 gap-2">
-                <Input
-                  value={textInput}
-                  onChange={e => setTextInput(e.target.value)}
-                  placeholder="Type your answer…"
+          {/* ── Answer Input bar ── */}
+          <div className="border-t border-border/40 bg-card/60 backdrop-blur-sm px-5 py-4 shrink-0">
+            <div className="flex items-center gap-3">
+              {textMode ? (
+                <form onSubmit={handleTextSubmit} className="flex flex-1 gap-2">
+                  <Input
+                    value={textInput}
+                    onChange={e => setTextInput(e.target.value)}
+                    placeholder="Type your answer…"
+                    disabled={interviewerSpeaking || waitingForAI}
+                    className="flex-1 rounded-xl border-border/60 bg-background/60"
+                    autoFocus
+                  />
+                  <Button type="submit" size="icon" className="rounded-xl h-10 w-10 shrink-0" disabled={!textInput.trim() || interviewerSpeaking || waitingForAI}>
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </form>
+              ) : (
+                <Button
+                  size="lg"
+                  className={`flex-1 gap-2 rounded-xl h-11 font-bold text-sm ${
+                    isListening
+                      ? 'bg-destructive hover:bg-destructive/90 shadow-lg shadow-destructive/20'
+                      : 'bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20'
+                  }`}
+                  onClick={isListening ? stopListening : startListening}
                   disabled={interviewerSpeaking || waitingForAI}
-                  autoFocus
-                />
-                <Button type="submit" size="icon" disabled={!textInput.trim() || interviewerSpeaking || waitingForAI}>
-                  <Send className="h-4 w-4" />
+                >
+                  {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                  {isListening ? 'Stop Recording' : 'Push to Talk'}
                 </Button>
-              </form>
-            ) : (
+              )}
+
+              {/* Toggle voice / text */}
               <Button
-                size="lg"
-                className={`flex-1 gap-2 rounded-xl py-6 ${isListening ? 'bg-destructive hover:bg-destructive/90' : ''}`}
-                onClick={isListening ? stopListening : startListening}
-                disabled={interviewerSpeaking || waitingForAI}
+                variant="outline"
+                size="icon"
+                className="h-11 w-11 rounded-xl border-border/60 shrink-0"
+                onClick={() => setTextMode(!textMode)}
+                title={textMode ? 'Switch to voice' : 'Switch to text'}
               >
-                {isListening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-                {isListening ? 'Stop Recording' : 'Push to Talk'}
+                {textMode ? <Mic className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTextMode(!textMode)}
-              title={textMode ? 'Switch to voice' : 'Switch to text'}
-            >
-              {textMode ? <Mic className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}
-            </Button>
+            </div>
+
+            <p className="mt-2 text-center text-[10px] text-muted-foreground/50">
+              {isListening ? '🔴 Recording — click Stop when done' : interviewerSpeaking ? 'Wait for the interviewer to finish…' : 'Your turn to answer'}
+            </p>
           </div>
         </div>
+
       </div>
     </div>
   );
 };
+
 
 export default InterviewRoom;
